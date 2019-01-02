@@ -1,1 +1,5 @@
 filename = "test_files//www_access.log.1"
+host = "sample.domain.com"
+protocol = "https"
+startTime = "2019-01-01 14:00:00"
+endTime = "2019-01-01 15:00:00"

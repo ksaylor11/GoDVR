@@ -16,6 +16,10 @@ var verbose = flag.Bool("verbose", false, "print info level logs to stdout")
 var logPathInput = flag.String("output", "audit.log", "output location")
 var confFileInput = flag.String("config", "config.toml", "configuration file")
 
+type LineList struct {
+	Items []apachelogparser.Line
+}
+
 func main() {
 
 	var (
@@ -44,18 +48,43 @@ func main() {
 		logger.Fatal(err)
 	}
 
-	// adding rate limiting
-	limit := conf.Limit
-	if limit == 0 {
-		for _, line := range lines {
-			timeReplay(line, conf)
-		}
-	} else {
-		for _, line := range lines[0:limit] {
-			timeReplay(line, conf)
+	// construct a list to work with instead of reading the file
+	l := LineList{}
+
+	StartTime,err := time.Parse("2006-01-02 15:04:05", conf.StartTime)
+	EndTime,err := time.Parse("2006-01-02 15:04:05", conf.EndTime)
+	for _, line := range lines {
+		if line.Time.After(StartTime) && line.Time.Before(EndTime){
+			l.Items = append(l.Items, line)
 		}
 	}
 
+	fmt.Printf("number of lines: %d\n", len(l.Items))
+
+	PreviousTime := StartTime
+	for _, line := range l.Items {
+		// get current time
+		if line.Method == "GET" {
+			if line.Time.After(PreviousTime) {
+				time.Sleep(line.Time.Sub(PreviousTime))
+				result, err := replay(line.URL, conf.Host, conf.Protocol)
+				if err != nil {
+					logger.Fatal(err)
+				}
+				fmt.Printf("url: %s \t status: %d\n", line.URL, result)
+				PreviousTime = line.Time
+			} else{
+				result, err := replay(line.URL, conf.Host, conf.Protocol)
+				if err != nil {
+					logger.Fatal(err)
+				}
+				fmt.Printf("url: %s \t status: %d\n", line.URL, result)
+				PreviousTime = line.Time
+			}
+		} else {
+			logger.Infof("Skipping %s requests\n", line.Method)
+		}
+	}
 }
 
 // replay function
@@ -69,25 +98,4 @@ func replay(URL string, host string, protocol string) (code int, err error) {
 	logger.Infof("result code %d\n", resp.StatusCode)
 
 	return resp.StatusCode, err
-}
-
-// replays within time frame
-func timeReplay(line apachelogparser.Line, conf config.Config){
-	if line.Method == "GET" {
-		// get current time
-		CurrentTime := time.Now()
-		ModifiedTime := line.Time.Add(time.Hour * 24)
-		if ModifiedTime.After(CurrentTime) {
-			time.Sleep(ModifiedTime.Sub(CurrentTime))
-			result, err := replay(line.URL, conf.Host, conf.Protocol)
-			if err != nil {
-				logger.Fatal(err)
-			}
-			fmt.Printf("url: %s \t status: %d\n", line.URL, result)
-		} else {
-			logger.Infof("skipping prior requests. time:%s\n", line.Time.Format("2006-01-02 15:04:05"))
-		}
-	} else {
-		logger.Infof("Skipping %s requests\n", line.Method)
-	}
 }
